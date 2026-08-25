@@ -74,6 +74,23 @@ export const buildApp = async () => {
     global: false,
     max: 300,
     timeWindow: '1 minute',
+    // Штатный ответ плагина — английский «Rate limit exceeded, retry in …»
+    // с кодом INTERNAL_ERROR. Его видел покупатель на странице оформления,
+    // хотя ничего не сломалось: он просто слишком часто нажимал.
+    // context.after — тоже английский («10 minutes»), поэтому считаем сами.
+    errorResponseBuilder: (_request, context) => {
+      const minutes = Math.max(1, Math.ceil(Number(context.ttl ?? 0) / 60_000));
+      const word = minutes === 1 ? 'минуту' : minutes < 5 ? 'минуты' : 'минут';
+      return {
+        statusCode: 429,
+        error: 'RATE_LIMITED',
+        // Ответ плагина проходит через общий setErrorHandler, а тот берёт код из
+        // поля `code`. Без него в теле оказывался INTERNAL_ERROR — будто сервер
+        // сломался, хотя человек просто слишком часто нажимал.
+        code: 'RATE_LIMITED',
+        message: `Слишком много попыток. Подождите ${minutes} ${word} и попробуйте ещё раз.`,
+      };
+    },
   });
 
   await app.register(multipart, {
@@ -99,7 +116,11 @@ export const buildApp = async () => {
     transform: jsonSchemaTransform,
   });
 
-  await app.register(swaggerUi, { routePrefix: '/docs' });
+  // Схему генерируем всегда (по ней собираются типы клиентов), а вот открытый
+  // просмотрщик в проде публиковал всю карту API кому угодно без авторизации.
+  if (!config.isProduction) {
+    await app.register(swaggerUi, { routePrefix: '/docs' });
+  }
 
   app.setErrorHandler((error, request, reply) => {
     if (error instanceof AppError) {

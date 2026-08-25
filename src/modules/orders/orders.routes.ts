@@ -19,7 +19,11 @@ const createOrderSchema = z.object({
     .trim()
     .min(10, 'Укажите телефон')
     .max(32)
-    .regex(/^[\d\s+()-]+$/, 'Телефон содержит недопустимые символы'),
+    .regex(/^[\d\s+()-]+$/, 'Телефон содержит недопустимые символы')
+    // Одной проверки набора символов мало: «++++++++++» и «()()()()()» ей
+    // удовлетворяют и создавали заказ, до которого потом не дозвониться.
+    // Считаем именно цифры — их должно хватать на настоящий номер.
+    .refine((value) => value.replace(/\D/g, '').length >= 10, 'Укажите телефон полностью'),
   channel: z.enum(['WHATSAPP', 'TELEGRAM']).default('WHATSAPP'),
   customerType: z.enum(['PERSON', 'BUSINESS']).default('PERSON'),
   deliveryType: z.enum(['DELIVERY', 'PICKUP']).default('DELIVERY'),

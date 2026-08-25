@@ -34,7 +34,18 @@ export const deliverySchema = z.object({
  */
 export const paymentSchema = z.object({
   kaspiEnabled: z.boolean(),
-  kaspiLink: z.string(),
+  /*
+   * Ссылку из кабинета Kaspi копируют по-разному: то с «https://», то без.
+   * Без схемы браузер считает её относительной, и кнопка «Оплатить» уводит
+   * на сам магазин (…/pay.kaspi.kz/pay) вместо банка — клиент не может
+   * заплатить и не понимает, почему. Поэтому схему достраиваем здесь, один
+   * раз для всех, кто читает настройки: и при сохранении, и при отдаче.
+   */
+  kaspiLink: z.string().transform((value) => {
+    const trimmed = value.trim();
+    if (!trimmed) return '';
+    return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed.replace(/^\/+/, '')}`;
+  }),
   /** Нужно ли клиенту вводить сумму самому — влияет на текст подсказки */
   kaspiAmountManual: z.boolean(),
   note: localized,

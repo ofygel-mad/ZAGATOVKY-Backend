@@ -1,0 +1,6 @@
+# Скрипты и конфиги, которые исполняются внутри Linux-контейнера, обязаны
+# оставаться с LF: с CRLF ядро не найдёт интерпретатор («bad interpreter: /bin/sh^M»).
+# На Windows git иначе подставит CRLF при клоне и локальная сборка образа сломается.
+*.sh text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf

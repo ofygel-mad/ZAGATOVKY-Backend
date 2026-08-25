@@ -24,6 +24,8 @@ const orderRow = z.object({
   total: z.number(),
   status: z.enum(statuses),
   isTest: z.boolean(),
+  isPaid: z.boolean(),
+  paidAt: z.string().nullable(),
   createdAt: z.string(),
   itemsCount: z.number(),
   items: z.array(
@@ -95,6 +97,8 @@ const serialize = (
     total: order.total,
     status: order.status,
     isTest: order.isTest,
+    isPaid: order.isPaid,
+    paidAt: order.paidAt?.toISOString() ?? null,
     createdAt: order.createdAt.toISOString(),
     itemsCount: order.items.reduce((sum, item) => sum + item.qty, 0),
     items: order.items.map((item) => ({
@@ -136,6 +140,7 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
           search: z.string().optional(),
           /** По умолчанию тестовые заказы Playwright скрыты */
           includeTest: z.coerce.boolean().default(false),
+          paid: z.enum(['yes', 'no']).optional(),
           limit: z.coerce.number().int().min(1).max(200).default(100),
           offset: z.coerce.number().int().min(0).default(0),
         }),
@@ -143,12 +148,13 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { status, search, includeTest, limit, offset } = request.query;
+      const { status, search, includeTest, paid, limit, offset } = request.query;
       const seq = search ? Number.parseInt(search.replace(/\D/g, ''), 10) : NaN;
 
       const where: Prisma.OrderWhereInput = {
         ...(status ? { status } : {}),
         ...(includeTest ? {} : { isTest: false }),
+        ...(paid ? { isPaid: paid === 'yes' } : {}),
         ...(search
           ? {
               OR: [
@@ -220,6 +226,49 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
         entityId: order.id,
         action: 'update',
         diff: { status: { from: existing.status, to: request.body.status } },
+      });
+
+      return serialize(order, settings.contacts);
+    },
+  );
+
+  app.patch(
+    '/orders/:id/paid',
+    {
+      onRequest: [app.authenticate, app.requireRole('OWNER', 'MANAGER')],
+      schema: {
+        tags: ['admin:orders'],
+        summary: 'Отметка об оплате',
+        description:
+          'Сейчас ставится вручную: Kaspi Pay не сообщает сайту об оплате по ссылке. ' +
+          'Эти же поля будет заполнять callback эквайринга, когда он появится.',
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        body: z.object({ isPaid: z.boolean() }),
+        response: { 200: orderRow },
+      },
+    },
+    async (request) => {
+      const existing = await prisma.order.findUnique({ where: { id: request.params.id } });
+      if (!existing) throw notFound('Заказ');
+
+      const [order, settings] = await Promise.all([
+        prisma.order.update({
+          where: { id: existing.id },
+          data: {
+            isPaid: request.body.isPaid,
+            paidAt: request.body.isPaid ? (existing.paidAt ?? new Date()) : null,
+          },
+          include: orderInclude,
+        }),
+        getPublicSettings(),
+      ]);
+
+      audit(request, {
+        entity: 'order',
+        entityId: order.id,
+        action: 'update',
+        diff: { isPaid: { from: existing.isPaid, to: request.body.isPaid } },
       });
 
       return serialize(order, settings.contacts);

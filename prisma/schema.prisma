@@ -323,6 +323,14 @@ model Order {
   /// Заказы, созданные Playwright-прогонами, помечаются здесь и фильтруются в админке
   isTest Boolean @default(false)
 
+  /// Оплата. Сейчас ставится вручную из кабинета: клиент платит по ссылке Kaspi Pay,
+  /// а тот об оплате сайту не сообщает. Эти же поля будет заполнять callback
+  /// эквайринга, когда он появится — см. PAYMENTS.md.
+  isPaid    Boolean   @default(false)
+  paidAt    DateTime?
+  /// Идентификатор платежа у провайдера — пригодится для сверки и возвратов
+  paymentRef String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

@@ -480,7 +480,7 @@ export const adminContentRoutes: FastifyPluginAsyncZod = async (app) => {
         tags: ['admin:content'],
         summary: 'Сохранение группы настроек (контакты, доставка, бренд)',
         security: [{ bearerAuth: [] }],
-        params: z.object({ group: z.enum(['contacts', 'delivery', 'brand']) }),
+        params: z.object({ group: z.enum(['contacts', 'delivery', 'payment', 'brand']) }),
         body: z.record(z.string(), z.any()),
         response: { 200: publicSettingsSchema.partial() },
       },

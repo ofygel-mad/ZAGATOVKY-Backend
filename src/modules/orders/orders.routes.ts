@@ -50,6 +50,8 @@ const orderResponseSchema = z.object({
   /** Готовая ссылка в WhatsApp/Telegram с текстом заказа. */
   chatUrl: z.string(),
   message: z.string(),
+  /** Ссылка Kaspi Pay на удалённую оплату — пусто, если способ выключен */
+  paymentUrl: z.string().nullable(),
 });
 
 export const orderRoutes: FastifyPluginAsyncZod = async (app) => {
@@ -160,6 +162,10 @@ export const orderRoutes: FastifyPluginAsyncZod = async (app) => {
         total,
         chatUrl: buildChatLink(order.channel, settings.contacts, message),
         message,
+        paymentUrl:
+          settings.payment.kaspiEnabled && settings.payment.kaspiLink
+            ? settings.payment.kaspiLink
+            : null,
       };
     },
   );

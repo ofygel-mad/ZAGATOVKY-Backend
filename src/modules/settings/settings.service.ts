@@ -27,6 +27,19 @@ export const deliverySchema = z.object({
   note: localized,
 });
 
+/**
+ * Оплата. Пока это ссылка Kaspi Pay на удалённую оплату: банк не сообщает сайту
+ * об оплате, поэтому статус ставится вручную в кабинете. Когда подключим
+ * эквайринг с callback — способ выключается одним флагом. См. PAYMENTS.md.
+ */
+export const paymentSchema = z.object({
+  kaspiEnabled: z.boolean(),
+  kaspiLink: z.string(),
+  /** Нужно ли клиенту вводить сумму самому — влияет на текст подсказки */
+  kaspiAmountManual: z.boolean(),
+  note: localized,
+});
+
 export const brandSchema = z.object({
   name: z.string(),
   tagline: localized,
@@ -58,6 +71,18 @@ export const settingsGroups = {
       },
     },
   },
+  payment: {
+    schema: paymentSchema,
+    defaults: {
+      kaspiEnabled: false,
+      kaspiLink: '',
+      kaspiAmountManual: true,
+      note: {
+        ru: 'Оплата после подтверждения заказа. Переводы на карту не принимаем — только на счёт компании.',
+        kk: 'Төлем тапсырыс расталғаннан кейін. Картаға аударым қабылдамаймыз — тек компания шотына.',
+      },
+    },
+  },
   brand: {
     schema: brandSchema,
     defaults: {
@@ -75,6 +100,7 @@ export type SettingsGroupKey = keyof typeof settingsGroups;
 export const publicSettingsSchema = z.object({
   contacts: contactsSchema,
   delivery: deliverySchema,
+  payment: paymentSchema,
   brand: brandSchema,
 });
 

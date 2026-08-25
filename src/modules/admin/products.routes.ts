@@ -40,6 +40,8 @@ const productBodySchema = z.object({
   descriptionKk: z.string().trim().max(4000).nullish(),
   price: z.number().int().min(0),
   compareAtPrice: z.number().int().min(0).nullish(),
+  /** Себестоимость — только для отчётов, на витрину не отдаётся */
+  costPrice: z.number().int().min(0).nullish(),
   weightValue: z.number().int().min(0),
   weightUnit: z.enum(['G', 'ML', 'PORTION', 'PCS']).default('G'),
   categoryId: z.string().nullish(),
@@ -73,6 +75,7 @@ const listItemSchema = productDetailSchema.extend({
   isActive: z.boolean(),
   sortOrder: z.number(),
   stockQty: z.number().nullable(),
+  costPrice: z.number().nullable(),
   updatedAt: z.string(),
 });
 
@@ -82,6 +85,7 @@ const toAdminProduct = (product: Prisma.ProductGetPayload<{ include: typeof prod
   isActive: product.isActive,
   sortOrder: product.sortOrder,
   stockQty: product.stockQty,
+  costPrice: product.costPrice,
   updatedAt: product.updatedAt.toISOString(),
 });
 
@@ -237,6 +241,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
             descriptionKk: body.descriptionKk ?? null,
             price: body.price,
             compareAtPrice: body.compareAtPrice ?? null,
+            costPrice: body.costPrice ?? null,
             weightValue: body.weightValue,
             weightUnit: body.weightUnit,
             categoryId: body.categoryId ?? null,
@@ -310,6 +315,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
             descriptionKk: body.descriptionKk ?? null,
             price: body.price,
             compareAtPrice: body.compareAtPrice ?? null,
+            costPrice: body.costPrice ?? null,
             weightValue: body.weightValue,
             weightUnit: body.weightUnit,
             categoryId: body.categoryId ?? null,
@@ -357,6 +363,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
           patch: z
             .object({
               price: z.number().int().min(0).optional(),
+              costPrice: z.number().int().min(0).nullish(),
               isActive: z.boolean().optional(),
               isFeatured: z.boolean().optional(),
               stockStatus: z.enum(['IN_STOCK', 'LOW', 'OUT']).optional(),
@@ -373,6 +380,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
         where: { id: { in: ids } },
         data: {
           ...(patch.price === undefined ? {} : { price: patch.price }),
+          ...(patch.costPrice === undefined ? {} : { costPrice: patch.costPrice }),
           ...(patch.isActive === undefined ? {} : { isActive: patch.isActive }),
           ...(patch.isFeatured === undefined ? {} : { isFeatured: patch.isFeatured }),
           ...(patch.stockStatus === undefined ? {} : { stockStatus: patch.stockStatus }),

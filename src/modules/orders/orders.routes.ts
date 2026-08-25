@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { badRequest } from '../../lib/errors.js';
+import { config } from '../../config.js';
 import { getPublicSettings } from '../settings/settings.service.js';
 import {
   buildChatLink,
@@ -59,7 +60,12 @@ export const orderRoutes: FastifyPluginAsyncZod = async (app) => {
     '/orders',
     {
       config: {
-        rateLimit: { max: 10, timeWindow: '10 minutes' },
+        // Защита от накрутки заявок. Локально порог поднят: прогон Playwright
+        // оформляет с десяток заказов подряд с одного адреса и упирался в лимит,
+        // из-за чего падали тесты, а не приложение. В проде остаётся строгим.
+        rateLimit: config.isProduction
+          ? { max: 10, timeWindow: '10 minutes' }
+          : { max: 200, timeWindow: '10 minutes' },
       },
       schema: {
         tags: ['orders'],
@@ -99,6 +105,9 @@ export const orderRoutes: FastifyPluginAsyncZod = async (app) => {
           price: product.price,
           qty: item.qty,
           weightLabel: formatWeight(product.weightValue, product.weightUnit),
+          // Снимок себестоимости: отчёт за прошлый месяц не должен меняться
+          // от того, что сегодня подняли закупочную цену.
+          costPrice: product.costPrice,
         };
       });
 

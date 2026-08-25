@@ -1,6 +1,7 @@
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
+import { booleanQuery } from '../../lib/query.js';
 import { badRequest, conflict, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { config } from '../../config.js';
@@ -129,31 +130,63 @@ export const mediaRoutes: FastifyPluginAsyncZod = async (app) => {
       schema: {
         tags: ['admin:media'],
         summary: 'Удаление файла из медиатеки и из R2',
+        description:
+          'Если фото где-то используется, запрос отклоняется и возвращает список мест. ' +
+          'С force=true оно сначала отвязывается от товаров и категорий, а потом удаляется.',
         security: [{ bearerAuth: [] }],
         params: z.object({ id: z.string() }),
-        response: { 200: z.object({ ok: z.boolean() }) },
+        querystring: z.object({ force: booleanQuery.default(false) }),
+        response: { 200: z.object({ ok: z.boolean(), detached: z.number() }) },
       },
     },
     async (request) => {
       const asset = await prisma.mediaAsset.findUnique({
         where: { id: request.params.id },
-        include: { _count: { select: { productImages: true, categories: true } } },
+        include: {
+          productImages: { select: { product: { select: { nameRu: true } } } },
+          categories: { select: { nameRu: true } },
+        },
       });
 
       if (!asset) throw notFound('Файл');
 
-      const usage = asset._count.productImages + asset._count.categories;
-      if (usage > 0) {
-        throw conflict(`Фото используется в ${usage} местах — сначала отвяжите его`);
+      const usedBy = [
+        ...asset.productImages.map((link) => link.product.nameRu),
+        ...asset.categories.map((category) => category.nameRu),
+      ];
+
+      // Без force удаление остаётся безопасным: сначала показываем, что сломается.
+      if (usedBy.length > 0 && !request.query.force) {
+        throw conflict(
+          `Фото используется: ${usedBy.slice(0, 5).join(', ')}` +
+            (usedBy.length > 5 ? ` и ещё ${usedBy.length - 5}` : ''),
+        );
       }
 
-      await deleteObject(asset.key).catch((error: unknown) =>
-        request.log.warn({ err: error }, 'Файл не удалён из R2, запись всё равно убираем'),
-      );
-      await prisma.mediaAsset.delete({ where: { id: asset.id } });
+      await prisma.$transaction(async (tx) => {
+        if (usedBy.length > 0) {
+          await tx.productImage.deleteMany({ where: { assetId: asset.id } });
+          await tx.category.updateMany({
+            where: { imageId: asset.id },
+            data: { imageId: null },
+          });
+        }
+        await tx.mediaAsset.delete({ where: { id: asset.id } });
+      });
 
-      audit(request, { entity: 'media', entityId: asset.id, action: 'delete' });
-      return { ok: true };
+      // Объект в R2 убираем после БД: если хранилище недоступно, запись всё равно ушла,
+      // и в медиатеке не останется битой карточки.
+      await deleteObject(asset.key).catch((error: unknown) =>
+        request.log.warn({ err: error }, 'Файл не удалён из R2, запись всё равно убрана'),
+      );
+
+      audit(request, {
+        entity: 'media',
+        entityId: asset.id,
+        action: 'delete',
+        diff: usedBy.length ? { detachedFrom: usedBy } : undefined,
+      });
+      return { ok: true, detached: usedBy.length };
     },
   );
 };

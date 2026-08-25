@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { booleanQuery } from '../../lib/query.js';
 
 /**
  * Двуязычный текст. Сервер всегда отдаёт обе версии, а витрина выбирает нужную
@@ -90,7 +91,7 @@ export const productListQuerySchema = z.object({
   category: z.string().optional(),
   search: z.string().optional(),
   type: z.enum(['SIMPLE', 'BUNDLE']).optional(),
-  featured: z.coerce.boolean().optional(),
+  featured: booleanQuery.optional(),
   sort: z.enum(['default', 'price_asc', 'price_desc', 'name', 'new']).default('default'),
   limit: z.coerce.number().int().min(1).max(100).default(60),
   offset: z.coerce.number().int().min(0).default(0),

@@ -128,6 +128,9 @@ model Product {
   price          Int
   /// Зачёркнутая «старая» цена, если идёт акция
   compareAtPrice Int?
+  /// Себестоимость в тенге. Необязательна: без неё отчёт считает только выручку,
+  /// а прибыль показывает как «нет данных» — см. финансовый раздел кабинета.
+  costPrice      Int?
 
   weightValue Int
   weightUnit  WeightUnit @default(G)
@@ -331,6 +334,10 @@ model Order {
   /// Идентификатор платежа у провайдера — пригодится для сверки и возвратов
   paymentRef String?
 
+  /// Архив вместо удаления: заказ пропадает из канбана и из отчётов,
+  /// но его можно вернуть. Настоящее удаление остаётся только для тестовых.
+  archivedAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -339,6 +346,7 @@ model Order {
 
   @@index([status, createdAt])
   @@index([isTest])
+  @@index([archivedAt])
 }
 
 model OrderItem {
@@ -354,6 +362,9 @@ model OrderItem {
   price       Int
   qty         Int
   weightLabel String
+  /// Себестоимость на момент заказа. Снимок нужен, чтобы прошлые отчёты
+  /// не переписывались задним числом при смене себестоимости в каталоге.
+  costPrice   Int?
 
   @@index([orderId])
 }

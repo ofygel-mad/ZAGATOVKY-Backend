@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
+import { booleanQuery } from '../../lib/query.js';
 import { notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { getPublicSettings } from '../settings/settings.service.js';
@@ -26,6 +27,7 @@ const orderRow = z.object({
   isTest: z.boolean(),
   isPaid: z.boolean(),
   paidAt: z.string().nullable(),
+  archivedAt: z.string().nullable(),
   createdAt: z.string(),
   itemsCount: z.number(),
   items: z.array(
@@ -99,6 +101,7 @@ const serialize = (
     isTest: order.isTest,
     isPaid: order.isPaid,
     paidAt: order.paidAt?.toISOString() ?? null,
+    archivedAt: order.archivedAt?.toISOString() ?? null,
     createdAt: order.createdAt.toISOString(),
     itemsCount: order.items.reduce((sum, item) => sum + item.qty, 0),
     items: order.items.map((item) => ({
@@ -139,8 +142,10 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
           status: z.enum(statuses).optional(),
           search: z.string().optional(),
           /** По умолчанию тестовые заказы Playwright скрыты */
-          includeTest: z.coerce.boolean().default(false),
+          includeTest: booleanQuery.default(false),
           paid: z.enum(['yes', 'no']).optional(),
+          /** По умолчанию архив скрыт: 'only' — показать только его, 'all' — вместе с рабочими */
+          archived: z.enum(['no', 'only', 'all']).default('no'),
           limit: z.coerce.number().int().min(1).max(200).default(100),
           offset: z.coerce.number().int().min(0).default(0),
         }),
@@ -148,13 +153,14 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request) => {
-      const { status, search, includeTest, paid, limit, offset } = request.query;
+      const { status, search, includeTest, paid, archived, limit, offset } = request.query;
       const seq = search ? Number.parseInt(search.replace(/\D/g, ''), 10) : NaN;
 
       const where: Prisma.OrderWhereInput = {
         ...(status ? { status } : {}),
         ...(includeTest ? {} : { isTest: false }),
         ...(paid ? { isPaid: paid === 'yes' } : {}),
+        ...(archived === 'all' ? {} : { archivedAt: archived === 'only' ? { not: null } : null }),
         ...(search
           ? {
               OR: [
@@ -269,6 +275,49 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
         entityId: order.id,
         action: 'update',
         diff: { isPaid: { from: existing.isPaid, to: request.body.isPaid } },
+      });
+
+      return serialize(order, settings.contacts);
+    },
+  );
+
+  app.patch(
+    '/orders/:id/archive',
+    {
+      onRequest: [app.authenticate, app.requireRole('OWNER', 'MANAGER')],
+      schema: {
+        tags: ['admin:orders'],
+        summary: 'Архивация заказа (мягкая альтернатива удалению)',
+        description:
+          'Архивный заказ исчезает из канбана и из финансового отчёта, но остаётся ' +
+          'в базе и восстанавливается тем же запросом с archived: false.',
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        body: z.object({ archived: z.boolean() }),
+        response: { 200: orderRow },
+      },
+    },
+    async (request) => {
+      const existing = await prisma.order.findUnique({ where: { id: request.params.id } });
+      if (!existing) throw notFound('Заказ');
+
+      const [order, settings] = await Promise.all([
+        prisma.order.update({
+          where: { id: existing.id },
+          data: {
+            // Повторный вызов не сдвигает дату архивации — операция идемпотентна
+            archivedAt: request.body.archived ? (existing.archivedAt ?? new Date()) : null,
+          },
+          include: orderInclude,
+        }),
+        getPublicSettings(),
+      ]);
+
+      audit(request, {
+        entity: 'order',
+        entityId: order.id,
+        action: 'update',
+        diff: { archived: { from: Boolean(existing.archivedAt), to: request.body.archived } },
       });
 
       return serialize(order, settings.contacts);

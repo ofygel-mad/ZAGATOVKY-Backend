@@ -26,6 +26,7 @@ import { adminProductRoutes } from './modules/admin/products.routes.js';
 import { adminContentRoutes } from './modules/admin/content.routes.js';
 import { adminOrderRoutes } from './modules/admin/orders.routes.js';
 import { adminSystemRoutes } from './modules/admin/system.routes.js';
+import { adminFinanceRoutes } from './modules/admin/finance.routes.js';
 
 export const buildApp = async () => {
   const app = Fastify({
@@ -152,6 +153,7 @@ export const buildApp = async () => {
             await secured.register(adminContentRoutes);
             await secured.register(adminOrderRoutes);
             await secured.register(adminSystemRoutes);
+            await secured.register(adminFinanceRoutes);
           });
         },
         { prefix: '/admin' },

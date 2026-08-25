@@ -1,0 +1,148 @@
+import Fastify from 'fastify';
+import cors from '@fastify/cors';
+import helmet from '@fastify/helmet';
+import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
+import rateLimit from '@fastify/rate-limit';
+import swagger from '@fastify/swagger';
+import swaggerUi from '@fastify/swagger-ui';
+import {
+  jsonSchemaTransform,
+  serializerCompiler,
+  validatorCompiler,
+  type ZodTypeProvider,
+} from 'fastify-type-provider-zod';
+import { ZodError } from 'zod';
+
+import { config } from './config.js';
+import { AppError } from './lib/errors.js';
+import { authPlugin } from './plugins/auth.js';
+import { catalogRoutes } from './modules/catalog/catalog.routes.js';
+import { homeRoutes } from './modules/home/home.routes.js';
+import { orderRoutes } from './modules/orders/orders.routes.js';
+import { authRoutes } from './modules/auth/auth.routes.js';
+import { mediaRoutes } from './modules/media/media.routes.js';
+import { adminProductRoutes } from './modules/admin/products.routes.js';
+import { adminContentRoutes } from './modules/admin/content.routes.js';
+import { adminOrderRoutes } from './modules/admin/orders.routes.js';
+import { adminSystemRoutes } from './modules/admin/system.routes.js';
+
+export const buildApp = async () => {
+  const app = Fastify({
+    logger: config.isDevelopment
+      ? { transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss', ignore: 'pid,hostname' } } }
+      : true,
+    trustProxy: true,
+    bodyLimit: 2 * 1024 * 1024,
+  }).withTypeProvider<ZodTypeProvider>();
+
+  app.setValidatorCompiler(validatorCompiler);
+  app.setSerializerCompiler(serializerCompiler);
+
+  await app.register(helmet, { contentSecurityPolicy: false });
+
+  await app.register(cors, {
+    origin: (origin, callback) => {
+      // Запросы без Origin (curl, healthcheck, серверные) пропускаем.
+      if (!origin) return callback(null, true);
+      const normalized = origin.replace(/\/$/, '');
+      callback(null, config.CORS_ORIGIN.includes(normalized));
+    },
+    credentials: true,
+  });
+
+  await app.register(cookie, { secret: config.JWT_REFRESH_SECRET });
+
+  await app.register(rateLimit, {
+    global: false,
+    max: 300,
+    timeWindow: '1 minute',
+  });
+
+  await app.register(multipart, {
+    limits: { fileSize: 15 * 1024 * 1024, files: 1 },
+  });
+
+  await app.register(authPlugin);
+
+  await app.register(swagger, {
+    openapi: {
+      info: {
+        title: 'ZAGATOVKY API',
+        description: 'Витрина кулинарных заготовок и админ-кабинет',
+        version: '1.0.0',
+      },
+      servers: [{ url: config.isProduction ? '/' : `http://localhost:${config.PORT}` }],
+      components: {
+        securitySchemes: {
+          bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+        },
+      },
+    },
+    transform: jsonSchemaTransform,
+  });
+
+  await app.register(swaggerUi, { routePrefix: '/docs' });
+
+  app.setErrorHandler((error, request, reply) => {
+    if (error instanceof AppError) {
+      return reply.code(error.statusCode).send({ error: error.code, message: error.message });
+    }
+
+    if (error instanceof ZodError || (error as { validation?: unknown }).validation) {
+      const issues =
+        error instanceof ZodError
+          ? error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
+          : undefined;
+      return reply.code(400).send({
+        error: 'VALIDATION_ERROR',
+        message: issues?.[0]?.message ?? 'Проверьте заполненные поля',
+        issues,
+      });
+    }
+
+    const fallback = error as { statusCode?: number; code?: string; message?: string };
+    const statusCode = fallback.statusCode ?? 500;
+    if (statusCode >= 500) request.log.error({ err: error }, 'Необработанная ошибка');
+
+    return reply.code(statusCode).send({
+      error: fallback.code ?? 'INTERNAL_ERROR',
+      message: statusCode >= 500 ? 'Внутренняя ошибка сервера' : fallback.message,
+    });
+  });
+
+  app.get('/health', { schema: { hide: true } }, async () => ({
+    status: 'ok',
+    uptime: Math.round(process.uptime()),
+    storage: config.storage.enabled ? 'r2' : 'disabled',
+  }));
+
+  await app.register(
+    async (api) => {
+      // Публичная часть — без авторизации
+      await api.register(catalogRoutes, { prefix: '/catalog' });
+      await api.register(homeRoutes);
+      await api.register(orderRoutes);
+
+      // Админка. Логин и refresh открыты, всё остальное — под токеном.
+      await api.register(
+        async (admin) => {
+          await admin.register(authRoutes, { prefix: '/auth' });
+
+          await admin.register(async (secured) => {
+            secured.addHook('onRequest', secured.authenticate);
+            await secured.register(mediaRoutes);
+            await secured.register(adminProductRoutes);
+            await secured.register(adminContentRoutes);
+            await secured.register(adminOrderRoutes);
+            await secured.register(adminSystemRoutes);
+          });
+        },
+        { prefix: '/admin' },
+      );
+    },
+    { prefix: config.apiPrefix },
+  );
+
+  return app;
+};

@@ -1,0 +1,25 @@
+# Локальная разработка: поднимает только Postgres.
+# API и фронтенды запускаются через npm run dev — так быстрее итерации.
+# Порт 5433, чтобы не конфликтовать с локально установленным Postgres на 5432.
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: zagatovky-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: zagatovky
+      POSTGRES_PASSWORD: zagatovky
+      POSTGRES_DB: zagatovky
+    ports:
+      - "5433:5432"
+    volumes:
+      - zagatovky-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zagatovky -d zagatovky"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  zagatovky-pgdata:

@@ -1,0 +1,382 @@
+// ZAGATOVKY — схема БД.
+// Цены хранятся в целых тенге (Int). Весь контентный текст — парой полей *Ru / *Kk.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────── Пользователи админки ───────────────────────────────
+
+enum UserRole {
+  OWNER
+  MANAGER
+  VIEWER
+}
+
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         UserRole  @default(MANAGER)
+  isActive     Boolean   @default(true)
+  /// Настройки рабочего места: тема, плотность, раскладка дашборда, сохранённые представления таблиц.
+  prefs        Json      @default("{}")
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  refreshTokens RefreshToken[]
+  auditLogs     AuditLog[]
+  orderEvents   OrderEvent[]
+  uploads       MediaAsset[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  userAgent String?
+  ip        String?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// ─────────────────────────────── Медиатека ───────────────────────────────
+
+model MediaAsset {
+  id          String   @id @default(cuid())
+  /// Ключ объекта в R2, например "products/2026/abc123.webp"
+  key         String   @unique
+  url         String
+  width       Int
+  height      Int
+  bytes       Int
+  mime        String
+  /// data:image/webp;base64,… крошечный плейсхолдер для плавной загрузки
+  lqip        String?
+  originalName String?
+  createdById String?
+  createdBy   User?    @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+
+  productImages ProductImage[]
+  categories    Category[]
+}
+
+// ─────────────────────────────── Каталог ───────────────────────────────
+
+enum ProductType {
+  SIMPLE
+  BUNDLE
+}
+
+enum WeightUnit {
+  G
+  ML
+  PORTION
+  PCS
+}
+
+enum StockStatus {
+  IN_STOCK
+  LOW
+  OUT
+}
+
+model Category {
+  id            String  @id @default(cuid())
+  slug          String  @unique
+  nameRu        String
+  nameKk        String
+  descriptionRu String?
+  descriptionKk String?
+  imageId       String?
+  image         MediaAsset? @relation(fields: [imageId], references: [id], onDelete: SetNull)
+  sortOrder     Int     @default(0)
+  isVisible     Boolean @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  products Product[]
+
+  @@index([sortOrder])
+}
+
+model Product {
+  id            String      @id @default(cuid())
+  slug          String      @unique
+  type          ProductType @default(SIMPLE)
+
+  nameRu        String
+  nameKk        String
+  shortRu       String?
+  shortKk       String?
+  descriptionRu String?
+  descriptionKk String?
+
+  /// Розничная цена в тенге
+  price          Int
+  /// Зачёркнутая «старая» цена, если идёт акция
+  compareAtPrice Int?
+
+  weightValue Int
+  weightUnit  WeightUnit @default(G)
+
+  categoryId String?
+  category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  stockStatus StockStatus @default(IN_STOCK)
+  stockQty    Int?
+
+  isActive   Boolean @default(true)
+  isFeatured Boolean @default(false)
+  sortOrder  Int     @default(0)
+
+  seoTitleRu String?
+  seoTitleKk String?
+  seoDescRu  String?
+  seoDescKk  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  images     ProductImage[]
+  badges     ProductBadge[]
+  /// Если это набор — из чего он состоит
+  bundleItems BundleItem[] @relation("BundleParent")
+  /// В какие наборы входит эта позиция
+  partOfBundles BundleItem[] @relation("BundleComponent")
+  collections CollectionProduct[]
+  orderItems  OrderItem[]
+
+  @@index([categoryId])
+  @@index([isActive, sortOrder])
+  @@index([type])
+}
+
+model ProductImage {
+  id        String @id @default(cuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  assetId   String
+  asset     MediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  altRu     String?
+  altKk     String?
+  sortOrder Int    @default(0)
+
+  @@index([productId, sortOrder])
+}
+
+model BundleItem {
+  id          String  @id @default(cuid())
+  bundleId    String
+  bundle      Product @relation("BundleParent", fields: [bundleId], references: [id], onDelete: Cascade)
+  componentId String
+  component   Product @relation("BundleComponent", fields: [componentId], references: [id], onDelete: Restrict)
+  qty         Int     @default(1)
+  sortOrder   Int     @default(0)
+
+  @@unique([bundleId, componentId])
+  @@index([bundleId, sortOrder])
+}
+
+/// Тон бейджа из дизайн-системы: gold — акцентный, teal — основной, stone — приглушённый
+enum BadgeTone {
+  GOLD
+  TEAL
+  STONE
+}
+
+model Badge {
+  id      String    @id @default(cuid())
+  code    String    @unique
+  labelRu String
+  labelKk String
+  tone    BadgeTone @default(TEAL)
+  icon    String?
+
+  products ProductBadge[]
+}
+
+model ProductBadge {
+  productId String
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  badgeId   String
+  badge     Badge   @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@id([productId, badgeId])
+}
+
+// ─────────────────────────────── Подборки и главная ───────────────────────────────
+
+model Collection {
+  id         String  @id @default(cuid())
+  slug       String  @unique
+  titleRu    String
+  titleKk    String
+  subtitleRu String?
+  subtitleKk String?
+  isVisible  Boolean @default(true)
+  sortOrder  Int     @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  products CollectionProduct[]
+}
+
+model CollectionProduct {
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product    @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sortOrder    Int        @default(0)
+
+  @@id([collectionId, productId])
+  @@index([collectionId, sortOrder])
+}
+
+enum HomeSectionKind {
+  HERO
+  COLLECTION
+  BUNDLES
+  CATEGORIES
+  EDITORIAL
+  BANNER
+  STEPS
+  FAQ
+  CONTACTS
+}
+
+model HomeSection {
+  id        String          @id @default(cuid())
+  kind      HomeSectionKind
+  /// Содержимое секции: заголовки RU/KK, ссылки на медиа, slug подборки и т.д.
+  payload   Json            @default("{}")
+  sortOrder Int             @default(0)
+  isVisible Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@index([sortOrder])
+}
+
+model SiteSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+// ─────────────────────────────── Заказы ───────────────────────────────
+
+enum OrderStatus {
+  NEW
+  CONFIRMED
+  COOKING
+  DELIVERING
+  DONE
+  CANCELLED
+}
+
+enum ContactChannel {
+  WHATSAPP
+  TELEGRAM
+}
+
+enum CustomerType {
+  PERSON
+  BUSINESS
+}
+
+enum DeliveryType {
+  DELIVERY
+  PICKUP
+}
+
+model Order {
+  id           String         @id @default(cuid())
+  /// Порядковый номер заказа. Витрине отдаётся отформатированным: ZG-000123.
+  /// autoincrement даёт атомарную выдачу без гонок и без лишних запросов.
+  seq          Int            @unique @default(autoincrement())
+  customerName String
+  phone        String
+  channel      ContactChannel @default(WHATSAPP)
+  customerType CustomerType   @default(PERSON)
+  deliveryType DeliveryType   @default(DELIVERY)
+  address      String?
+  comment      String?
+
+  subtotal    Int
+  deliveryFee Int         @default(0)
+  total       Int
+  status      OrderStatus @default(NEW)
+
+  /// Заказы, созданные Playwright-прогонами, помечаются здесь и фильтруются в админке
+  isTest Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  items  OrderItem[]
+  events OrderEvent[]
+
+  @@index([status, createdAt])
+  @@index([isTest])
+}
+
+model OrderItem {
+  id        String  @id @default(cuid())
+  orderId   String
+  order     Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  // Снимок товара на момент заказа — цены и названия потом могут измениться
+  nameRu      String
+  nameKk      String
+  price       Int
+  qty         Int
+  weightLabel String
+
+  @@index([orderId])
+}
+
+model OrderEvent {
+  id         String       @id @default(cuid())
+  orderId    String
+  order      Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  userId     String?
+  user       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fromStatus OrderStatus?
+  toStatus   OrderStatus
+  note       String?
+  createdAt  DateTime     @default(now())
+
+  @@index([orderId, createdAt])
+}
+
+// ─────────────────────────────── Журнал действий ───────────────────────────────
+
+model AuditLog {
+  id       String  @id @default(cuid())
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  entity   String
+  entityId String?
+  action   String
+  diff     Json?
+  ip       String?
+  createdAt DateTime @default(now())
+
+  @@index([entity, entityId])
+  @@index([createdAt])
+}

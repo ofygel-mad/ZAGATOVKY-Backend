@@ -35,6 +35,8 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/package.json ./package.json
+COPY docker-entrypoint.sh ./docker-entrypoint.sh
+RUN chmod +x ./docker-entrypoint.sh
 
 # Railway подставляет PORT сам
 ENV HOST=0.0.0.0
@@ -42,5 +44,5 @@ EXPOSE 3000
 
 USER node
 
-# Миграции применяются на старте — новый деплой сам приводит схему в порядок
-CMD ["sh", "-c", "node node_modules/prisma/build/index.js migrate deploy && node dist/src/server.js"]
+# Точка входа проверяет окружение, применяет миграции и стартует сервер
+CMD ["./docker-entrypoint.sh"]

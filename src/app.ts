@@ -41,12 +41,28 @@ export const buildApp = async () => {
 
   await app.register(helmet, { contentSecurityPolicy: false });
 
+  // Чужой origin отвергается молча: браузер показывает ошибку, а в логах сервера
+  // пусто — по такой картине причину не найти. Поэтому каждый новый отвергнутый
+  // домен логируем один раз, сразу с подсказкой, что дописать в CORS_ORIGIN.
+  const rejectedOrigins = new Set<string>();
+
   await app.register(cors, {
     origin: (origin, callback) => {
       // Запросы без Origin (curl, healthcheck, серверные) пропускаем.
       if (!origin) return callback(null, true);
+
       const normalized = origin.replace(/\/$/, '');
-      callback(null, config.CORS_ORIGIN.includes(normalized));
+      const allowed = config.CORS_ORIGIN.includes(normalized);
+
+      if (!allowed && !rejectedOrigins.has(normalized)) {
+        rejectedOrigins.add(normalized);
+        app.log.warn(
+          `CORS: домен ${normalized} не разрешён. Добавьте его в переменную CORS_ORIGIN ` +
+            `(сейчас разрешены: ${config.CORS_ORIGIN.join(', ') || 'ничего'}).`,
+        );
+      }
+
+      callback(null, allowed);
     },
     credentials: true,
   });

@@ -15,8 +15,12 @@ const originList = z.string().transform((value) =>
     .map((item) => item.trim().replace(/^["'\\]+|["'\\]+$/g, ''))
     .filter(Boolean)
     .map((item) => {
+      // Домен без схемы («zagatovky.men») сам по себе никогда не совпадёт
+      // с заголовком Origin, который браузер шлёт всегда со схемой.
+      // Достраиваем https, иначе такая запись молча не работала бы.
+      const withScheme = /^https?:\/\//i.test(item) ? item : `https://${item}`;
       try {
-        return new URL(item).origin;
+        return new URL(withScheme).origin;
       } catch {
         return item.replace(/\/+$/, '');
       }

@@ -1,14 +1,28 @@
 import 'dotenv/config';
 import { z } from 'zod';
 
-const csv = z
-  .string()
-  .transform((value) =>
-    value
-      .split(',')
-      .map((item) => item.trim().replace(/\/$/, ''))
-      .filter(Boolean),
-  );
+/**
+ * Список origin'ов через запятую.
+ *
+ * Значение приходит из панели хостинга, где легко занести лишнее: кавычки,
+ * экранирование, слэш или целый путь вроде /login. Браузер же присылает
+ * в Origin только схему и хост, поэтому приводим каждый элемент именно к нему —
+ * иначе сравнение молча не совпадёт и запросы будут блокироваться без внятной причины.
+ */
+const originList = z.string().transform((value) =>
+  value
+    .split(',')
+    .map((item) => item.trim().replace(/^["'\\]+|["'\\]+$/g, ''))
+    .filter(Boolean)
+    .map((item) => {
+      try {
+        return new URL(item).origin;
+      } catch {
+        return item.replace(/\/+$/, '');
+      }
+    })
+    .filter(Boolean),
+);
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -16,7 +30,7 @@ const schema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
 
   APP_URL: z.string().url(),
-  CORS_ORIGIN: csv,
+  CORS_ORIGIN: originList,
 
   DATABASE_URL: z.string().min(1),
 

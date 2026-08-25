@@ -136,7 +136,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
           search: z.string().optional(),
           category: z.string().optional(),
           type: z.enum(['SIMPLE', 'BUNDLE']).optional(),
-          status: z.enum(['active', 'hidden', 'out']).optional(),
+          status: z.enum(['active', 'hidden', 'out', 'nophoto']).optional(),
           limit: z.coerce.number().int().min(1).max(200).default(100),
           offset: z.coerce.number().int().min(0).default(0),
         }),
@@ -152,6 +152,8 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
         ...(status === 'active' ? { isActive: true } : {}),
         ...(status === 'hidden' ? { isActive: false } : {}),
         ...(status === 'out' ? { stockStatus: 'OUT' } : {}),
+        // Товары без единого снимка — витрина показывает вместо них буквенную заглушку
+        ...(status === 'nophoto' ? { images: { none: {} } } : {}),
         ...(search
           ? {
               OR: [

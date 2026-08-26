@@ -27,6 +27,8 @@ import { adminContentRoutes } from './modules/admin/content.routes.js';
 import { adminOrderRoutes } from './modules/admin/orders.routes.js';
 import { adminSystemRoutes } from './modules/admin/system.routes.js';
 import { adminFinanceRoutes } from './modules/admin/finance.routes.js';
+import { feedbackRoutes } from './modules/feedback/feedback.routes.js';
+import { adminFeedbackRoutes } from './modules/admin/feedback.routes.js';
 
 export const buildApp = async () => {
   const app = Fastify({
@@ -177,6 +179,7 @@ export const buildApp = async () => {
       await api.register(catalogRoutes, { prefix: '/catalog' });
       await api.register(homeRoutes);
       await api.register(orderRoutes);
+      await api.register(feedbackRoutes);
 
       // Админка. Логин и refresh открыты, всё остальное — под токеном.
       await api.register(
@@ -191,6 +194,7 @@ export const buildApp = async () => {
             await secured.register(adminOrderRoutes);
             await secured.register(adminSystemRoutes);
             await secured.register(adminFinanceRoutes);
+            await secured.register(adminFeedbackRoutes);
           });
         },
         { prefix: '/admin' },

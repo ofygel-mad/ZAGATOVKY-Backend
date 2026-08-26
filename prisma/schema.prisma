@@ -399,3 +399,43 @@ model AuditLog {
   @@index([entity, entityId])
   @@index([createdAt])
 }
+
+// ─────────────────────────────── Обратная связь ───────────────────────────────
+
+enum FeedbackKind {
+  /// «Хочу видеть у вас такой-то продукт»
+  WISH
+  /// Отзыв о заказе или сервисе
+  REVIEW
+  /// Вопрос, на который не ответил блок «Частые вопросы»
+  QUESTION
+}
+
+/// Сообщение с витрины: пожелание по ассортименту, отзыв или вопрос.
+/// Заказ из этого не создаётся — это только повод написать клиенту.
+model Feedback {
+  id      String       @id @default(cuid())
+  kind    FeedbackKind @default(WISH)
+  name    String
+  /// Телефон или ник — необязателен: человек может просто оставить пожелание
+  contact String?
+  message String
+  /// Язык витрины в момент отправки — на нём же и отвечать
+  locale  String       @default("ru")
+
+  /// Непрочитанные подсвечиваются в меню кабинета счётчиком
+  isRead Boolean   @default(false)
+  readAt DateTime?
+
+  /// Отметка автотестов — как у заказов, чтобы прогоны не мусорили в кабинете
+  isTest Boolean @default(false)
+
+  /// Архив вместо удаления, как у заказов
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([isRead, createdAt])
+  @@index([archivedAt])
+  @@index([isTest])
+}

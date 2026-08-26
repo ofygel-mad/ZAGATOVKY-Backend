@@ -38,11 +38,30 @@ const productBodySchema = z.object({
   shortKk: z.string().trim().max(200).nullish(),
   descriptionRu: z.string().trim().max(4000).nullish(),
   descriptionKk: z.string().trim().max(4000).nullish(),
-  price: z.number().int().min(0),
-  compareAtPrice: z.number().int().min(0).nullish(),
+  /*
+   * Нижняя граница — 1, а не 0. Цена 0 сохранялась молча, карточка показывала
+   * «0 тг», и товар спокойно клался в корзину: одна опечатка в поле цены — и
+   * заготовки уезжают бесплатно (самовывоз минимальную сумму не проверяет).
+   * Верхняя граница — защита от лишнего нуля при наборе.
+   */
+  price: z
+    .number()
+    .int('Цена указывается в целых тенге')
+    .min(1, 'Цена должна быть больше нуля')
+    .max(10_000_000, 'Цена выглядит ошибочной — проверьте количество нулей'),
+  compareAtPrice: z
+    .number()
+    .int('Старая цена указывается в целых тенге')
+    .min(1, 'Старая цена должна быть больше нуля')
+    .max(10_000_000, 'Старая цена выглядит ошибочной — проверьте количество нулей')
+    .nullish(),
   /** Себестоимость — только для отчётов, на витрину не отдаётся */
-  costPrice: z.number().int().min(0).nullish(),
-  weightValue: z.number().int().min(0),
+  costPrice: z.number().int().min(0).max(10_000_000).nullish(),
+  /*
+   * Вес 0 тоже принимался: карточка писала «0 Г», а строка «за 100 г»
+   * пропадала — покупатель не понимал, что берёт.
+   */
+  weightValue: z.number().int().min(1, 'Укажите вес или объём порции'),
   weightUnit: z.enum(['G', 'ML', 'PORTION', 'PCS']).default('G'),
   categoryId: z.string().nullish(),
   stockStatus: z.enum(['IN_STOCK', 'LOW', 'OUT']).default('IN_STOCK'),
@@ -69,6 +88,23 @@ const productBodySchema = z.object({
   bundleItems: z
     .array(z.object({ componentId: z.string(), qty: z.number().int().min(1).max(20) }))
     .default([]),
+}).superRefine((value, ctx) => {
+  /*
+   * «Старая цена» ниже текущей рисовала скидку наоборот: карточка показывала
+   * зачёркнутые 10 ₸ рядом с настоящими 330 ₸. Это не украшение, а прямая
+   * дезинформация покупателя, поэтому отсекаем на входе.
+   */
+  if (
+    value.compareAtPrice !== null &&
+    value.compareAtPrice !== undefined &&
+    value.compareAtPrice <= value.price
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['compareAtPrice'],
+      message: 'Старая цена должна быть выше текущей — иначе скидка выглядит наоборот',
+    });
+  }
 });
 
 const listItemSchema = productDetailSchema.extend({

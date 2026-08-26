@@ -127,14 +127,30 @@ export const buildApp = async () => {
       return reply.code(error.statusCode).send({ error: error.code, message: error.message });
     }
 
-    if (error instanceof ZodError || (error as { validation?: unknown }).validation) {
+    /*
+     * Fastify не пробрасывает ZodError наружу: валидатор возвращает готовый
+     * массив в error.validation, где у каждой записи лежит зодовское сообщение
+     * и путь до поля. Раньше разбиралась только ветка с настоящим ZodError, а
+     * реальные запросы шли по второй — и все написанные тексты («Укажите телефон
+     * полностью», «Старая цена должна быть выше текущей») подменялись общим
+     * «Проверьте заполненные поля». Человек видел отказ и не понимал, где ошибся.
+     */
+    const fastifyIssues = (
+      error as { validation?: { instancePath?: string; message?: string }[] }
+    ).validation;
+
+    if (error instanceof ZodError || fastifyIssues) {
       const issues =
         error instanceof ZodError
           ? error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
-          : undefined;
+          : fastifyIssues!.map((issue) => ({
+              path: (issue.instancePath ?? '').replace(/^\//, '').replace(/\//g, '.'),
+              message: issue.message ?? 'Проверьте значение',
+            }));
+
       return reply.code(400).send({
         error: 'VALIDATION_ERROR',
-        message: issues?.[0]?.message ?? 'Проверьте заполненные поля',
+        message: issues[0]?.message ?? 'Проверьте заполненные поля',
         issues,
       });
     }

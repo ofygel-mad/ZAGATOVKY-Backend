@@ -13,12 +13,15 @@ import {
 } from './orders.service.js';
 
 const createOrderSchema = z.object({
-  customerName: z.string().trim().min(2, 'Укажите имя').max(120),
+  // Тексты заданы у каждой проверки: без них Zod отдаёт свои английские
+  // формулировки вроде «Number must be greater than or equal to 1», и они
+  // доезжают прямо до покупателя на странице оформления.
+  customerName: z.string().trim().min(2, 'Укажите имя').max(120, 'Имя слишком длинное'),
   phone: z
     .string()
     .trim()
     .min(10, 'Укажите телефон')
-    .max(32)
+    .max(32, 'Телефон слишком длинный')
     .regex(/^[\d\s+()-]+$/, 'Телефон содержит недопустимые символы')
     // Одной проверки набора символов мало: «++++++++++» и «()()()()()» ей
     // удовлетворяют и создавали заказ, до которого потом не дозвониться.
@@ -27,18 +30,22 @@ const createOrderSchema = z.object({
   channel: z.enum(['WHATSAPP', 'TELEGRAM']).default('WHATSAPP'),
   customerType: z.enum(['PERSON', 'BUSINESS']).default('PERSON'),
   deliveryType: z.enum(['DELIVERY', 'PICKUP']).default('DELIVERY'),
-  address: z.string().trim().max(300).optional(),
-  comment: z.string().trim().max(1000).optional(),
+  address: z.string().trim().max(300, 'Адрес слишком длинный').optional(),
+  comment: z.string().trim().max(1000, 'Комментарий слишком длинный').optional(),
   locale: z.enum(['ru', 'kk']).default('ru'),
   items: z
     .array(
       z.object({
-        productId: z.string().min(1),
-        qty: z.number().int().min(1).max(99),
+        productId: z.string().min(1, 'Товар не указан'),
+        qty: z
+          .number()
+          .int('Количество указывается целым числом')
+          .min(1, 'Количество должно быть не меньше одного')
+          .max(99, 'За раз можно заказать не больше 99 штук одной позиции'),
       }),
     )
     .min(1, 'Корзина пуста')
-    .max(50),
+    .max(50, 'В одном заказе не больше 50 разных позиций'),
   /** Ловушка для ботов: настоящий пользователь это поле не видит и не заполняет. */
   website: z.string().max(0).optional(),
   /** Проставляется Playwright-прогонами, чтобы отделить тестовые заявки от реальных. */

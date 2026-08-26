@@ -3,12 +3,22 @@ import type { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma.js';
 import { booleanQuery } from '../../lib/query.js';
-import { notFound } from '../../lib/errors.js';
+import { conflict, notFound } from '../../lib/errors.js';
 import { audit } from '../../lib/audit.js';
 import { getPublicSettings } from '../settings/settings.service.js';
 import { buildChatLink, buildOrderMessage, formatOrderNumber } from '../orders/orders.service.js';
 
 const statuses = ['NEW', 'CONFIRMED', 'COOKING', 'DELIVERING', 'DONE', 'CANCELLED'] as const;
+
+/** Названия колонок канбана — чтобы отказ объяснялся человеческим языком. */
+const statusLabels: Record<(typeof statuses)[number], string> = {
+  NEW: 'Новые',
+  CONFIRMED: 'Подтверждены',
+  COOKING: 'Готовим',
+  DELIVERING: 'В пути',
+  DONE: 'Доставлены',
+  CANCELLED: 'Отменены',
+};
 
 const orderRow = z.object({
   id: z.string(),
@@ -208,15 +218,56 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
       const existing = await prisma.order.findUnique({ where: { id: request.params.id } });
       if (!existing) throw notFound('Заказ');
 
+      const next = request.body.status;
+
+      // Тот же статус — ничего не делаем. Канбан присылает это при перетаскивании
+      // карточки обратно в свою же колонку, и без выхода журнал заполнялся бы
+      // переходами «из NEW в NEW».
+      if (existing.status === next) {
+        const settings = await getPublicSettings();
+        const order = await prisma.order.findUniqueOrThrow({
+          where: { id: existing.id },
+          include: orderInclude,
+        });
+        return serialize(order, settings.contacts);
+      }
+
+      /*
+       * Завершённый и отменённый заказы закрыты для произвольных переходов.
+       * Раньше разрешалось всё подряд: DONE → NEW возвращал доставленный и
+       * оплаченный заказ в работу, CANCELLED → NEW оживлял отменённый. На
+       * канбане это один промах мышью, после которого заказ второй раз уходит
+       * в готовку. Оставляем ровно одну лазейку — вернуть заказ туда, откуда
+       * его закрыли: это отменяет случайное действие и не даёт выдумать
+       * произвольную новую историю.
+       */
+      if (existing.status === 'DONE' || existing.status === 'CANCELLED') {
+        const closing = await prisma.orderEvent.findFirst({
+          where: { orderId: existing.id, toStatus: existing.status },
+          orderBy: { createdAt: 'desc' },
+        });
+        const undoTo = closing?.fromStatus ?? null;
+
+        if (!undoTo || next !== undoTo) {
+          const label = existing.status === 'DONE' ? 'завершённый' : 'отменённый';
+          throw conflict(
+            undoTo
+              ? `Это ${label} заказ. Его можно только вернуть в «${statusLabels[undoTo]}» — ` +
+                  'туда, откуда закрыли.'
+              : `Это ${label} заказ, менять его статус нельзя.`,
+          );
+        }
+      }
+
       const [order, settings] = await Promise.all([
         prisma.order.update({
           where: { id: existing.id },
           data: {
-            status: request.body.status,
+            status: next,
             events: {
               create: {
                 fromStatus: existing.status,
-                toStatus: request.body.status,
+                toStatus: next,
                 note: request.body.note ?? null,
                 userId: request.authUser!.id,
               },
@@ -321,6 +372,53 @@ export const adminOrderRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       return serialize(order, settings.contacts);
+    },
+  );
+
+  /*
+   * Совсем удалить заказ раньше было нельзя: жёсткое удаление существовало
+   * только для прогонов Playwright (isTest), а спам и заявки-ошибки оставались
+   * в базе навсегда — их можно было лишь спрятать в архив. Архив для этого и
+   * задуман, поэтому обычный путь остаётся прежним, а удаление отдаём только
+   * владельцу и только для заказа, который уже убран в архив: это защищает от
+   * случайного удаления живой заявки одним запросом.
+   */
+  app.delete(
+    '/orders/:id',
+    {
+      onRequest: [app.authenticate, app.requireRole('OWNER')],
+      schema: {
+        tags: ['admin:orders'],
+        summary: 'Безвозвратное удаление заказа (только владелец, только из архива)',
+        description:
+          'Сначала заказ нужно отправить в архив. Удаление снимает его вместе с позициями ' +
+          'и историей статусов — отменить это нельзя.',
+        security: [{ bearerAuth: [] }],
+        params: z.object({ id: z.string() }),
+        response: { 200: z.object({ deleted: z.literal(1), number: z.string() }) },
+      },
+    },
+    async (request) => {
+      const existing = await prisma.order.findUnique({ where: { id: request.params.id } });
+      if (!existing) throw notFound('Заказ');
+
+      if (!existing.archivedAt) {
+        throw conflict(
+          'Сначала отправьте заказ в архив — так удаление не сработает по случайному клику.',
+        );
+      }
+
+      const number = formatOrderNumber(existing.seq);
+      await prisma.order.delete({ where: { id: existing.id } });
+
+      audit(request, {
+        entity: 'order',
+        entityId: existing.id,
+        action: 'delete',
+        diff: { number: { from: number, to: null } },
+      });
+
+      return { deleted: 1 as const, number };
     },
   );
 

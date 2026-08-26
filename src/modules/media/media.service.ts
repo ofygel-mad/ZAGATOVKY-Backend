@@ -53,7 +53,19 @@ export const processAndUpload = async (
   }
 
   const pipeline = sharp(buffer, { failOn: 'error' }).rotate();
-  const meta = await pipeline.metadata();
+
+  /*
+   * Заголовок Content-Type присылает клиент, и он может врать: файл с типом
+   * image/png, но с чем угодно внутри, роняет sharp — исключение улетало в
+   * общий обработчик, и в кабинете появлялось «Внутренняя ошибка сервера».
+   * Это не поломка сервера, а негодный файл, поэтому отвечаем понятным 400.
+   */
+  let meta;
+  try {
+    meta = await pipeline.metadata();
+  } catch {
+    throw badRequest('Файл не похож на изображение — проверьте, что загружаете фото');
+  }
 
   if (!meta.width || !meta.height) throw badRequest('Не удалось прочитать изображение');
 

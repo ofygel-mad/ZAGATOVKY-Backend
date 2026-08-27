@@ -38,6 +38,7 @@ export const serializeProductCard = (product: ProductWithCard): ProductCard => (
   price: product.price,
   compareAtPrice: product.compareAtPrice,
   weight: { value: product.weightValue, unit: product.weightUnit },
+  portions: product.portions,
   stockStatus: product.stockStatus,
   isFeatured: product.isFeatured,
   category: product.category

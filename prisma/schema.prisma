@@ -135,6 +135,12 @@ model Product {
   weightValue Int
   weightUnit  WeightUnit @default(G)
 
+  /// На сколько порций блюда рассчитана позиция. Необязательно: у расходников
+  /// вроде масла и специй порция бессмысленна, и тогда витрина показывает
+  /// только вес. Компоненты набора несут то же число, что и сам набор —
+  /// они нарезаны под один объём блюда.
+  portions    Int?
+
   categoryId String?
   category   Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 

@@ -54,6 +54,8 @@ export const productCardSchema = z.object({
   price: z.number(),
   compareAtPrice: z.number().nullable(),
   weight: weightSchema,
+  /** На сколько порций блюда рассчитана позиция. null — порция здесь бессмысленна */
+  portions: z.number().nullable(),
   stockStatus: z.enum(['IN_STOCK', 'LOW', 'OUT']),
   isFeatured: z.boolean(),
   category: z

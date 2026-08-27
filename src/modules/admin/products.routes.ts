@@ -63,6 +63,8 @@ const productBodySchema = z.object({
    */
   weightValue: z.number().int().min(1, 'Укажите вес или объём порции'),
   weightUnit: z.enum(['G', 'ML', 'PORTION', 'PCS']).default('G'),
+  /** Порции: необязательны — у расходников вроде масла и специй их не бывает */
+  portions: z.number().int().min(1).max(99).nullish(),
   categoryId: z.string().nullish(),
   stockStatus: z.enum(['IN_STOCK', 'LOW', 'OUT']).default('IN_STOCK'),
   stockQty: z.number().int().min(0).nullish(),
@@ -280,6 +282,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
             costPrice: body.costPrice ?? null,
             weightValue: body.weightValue,
             weightUnit: body.weightUnit,
+            portions: body.portions ?? null,
             categoryId: body.categoryId ?? null,
             stockStatus: body.stockStatus,
             stockQty: body.stockQty ?? null,
@@ -354,6 +357,7 @@ export const adminProductRoutes: FastifyPluginAsyncZod = async (app) => {
             costPrice: body.costPrice ?? null,
             weightValue: body.weightValue,
             weightUnit: body.weightUnit,
+            portions: body.portions ?? null,
             categoryId: body.categoryId ?? null,
             stockStatus: body.stockStatus,
             stockQty: body.stockQty ?? null,

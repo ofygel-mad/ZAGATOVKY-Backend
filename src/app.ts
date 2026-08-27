@@ -28,6 +28,7 @@ import { adminOrderRoutes } from './modules/admin/orders.routes.js';
 import { adminSystemRoutes } from './modules/admin/system.routes.js';
 import { adminFinanceRoutes } from './modules/admin/finance.routes.js';
 import { feedbackRoutes } from './modules/feedback/feedback.routes.js';
+import { sitemapRoutes } from './modules/catalog/sitemap.routes.js';
 import { adminFeedbackRoutes } from './modules/admin/feedback.routes.js';
 
 export const buildApp = async () => {
@@ -166,6 +167,10 @@ export const buildApp = async () => {
       message: statusCode >= 500 ? 'Внутренняя ошибка сервера' : fallback.message,
     });
   });
+
+  // Вне версионированного префикса: nginx витрины проксирует сюда /sitemap.xml,
+  // и поисковик обязан видеть карту в корне домена магазина
+  await app.register(sitemapRoutes);
 
   app.get('/health', { schema: { hide: true } }, async () => ({
     status: 'ok',
